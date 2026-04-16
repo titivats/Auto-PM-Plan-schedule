@@ -1,0 +1,17 @@
+venv/
+build/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+dist/
+!dist/.gitkeep
+
+*.spec.bak
+
+pm_plan_auto_schedule/__pycache__/
+tools/__pycache__/
+
+app_state.json
+dist/app_state.json
