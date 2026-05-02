@@ -38,7 +38,11 @@ SHEET_INDEX = 1
 PLAN_START_ROW = 18
 PLAN_END_ROW = 52
 
-DE_DROSS_TEXT = "DE-DROSS\n30MIN"
+DE_DROSS_TEXT = "DE-DROSS\n30 MIN"
+ALL_BACKLINE_DE_DROSS_TEXT = DE_DROSS_TEXT
+REMOVE_CHEMICAL_TEXT = "REMOVE\nCHEMICAL"
+YELLOW_FILL_COLOR = 65535
+PINK_FILL_COLOR = 13408767
 XL_PASTE_FORMATS = -4122
 
 
@@ -68,6 +72,10 @@ class RowScheduleRule:
     de_dross_start_day: int | None
     pm_plan_start_day: int | None
     pm_plan_text: str | None
+    de_dross_text: str
+    auto_de_dross: bool
+    chemical_source_col: int | None
+    auto_remove_unused_chemical: bool
 
 
 LogFn = Callable[[str], None]
@@ -122,23 +130,38 @@ def normalize_cell_text(value: object) -> str:
     return str(value or "").replace("\r\n", "\n").replace("\r", "\n").strip()
 
 
-def parse_template_month(worksheet) -> int:
-    text = normalize_cell_text(worksheet.Cells(*DATE_CELL).Text)
+def parse_month_text(text: str) -> int | None:
     match = re.match(r"(\d{1,2})-([A-Za-z]{3})-(\d{2,4})$", text)
     if not match:
-        return 1
+        return None
 
     month_abbr = match.group(2).upper()
     if month_abbr not in MONTH_ABBRS:
-        return 1
+        return None
     return MONTH_ABBRS.index(month_abbr) + 1
+
+
+def parse_template_month(worksheet) -> int:
+    cell = worksheet.Cells(*DATE_CELL)
+    value = cell.Value
+    if hasattr(value, "month"):
+        return int(value.month)
+
+    parsed = parse_month_text(normalize_cell_text(cell.Text))
+    if parsed is not None:
+        return parsed
+
+    raise GenerationError(
+        f"Could not read template month from cell B9. Expected a date or text like 1-Jan-2026."
+    )
 
 
 def classify_schedule_text(text: str) -> str | None:
     normalized = normalize_cell_text(text).upper()
     if not normalized:
         return None
-    if normalized == DE_DROSS_TEXT.upper():
+    compact = re.sub(r"\s+", " ", normalized)
+    if compact in {"DE-DROSS 30MIN", "DE-DROSS PLAN 30MIN", "DE-DROSS 30 MIN", "DE-DROSS PLAN 30 MIN"}:
         return "de_dross"
     if normalized.startswith("PM TEAM") or normalized.startswith("PM PLAN"):
         return "pm_plan"
@@ -159,6 +182,14 @@ def uses_pm_anchor_for_de_dross(machine_name: str) -> bool:
     )
 
 
+def needs_all_backline_de_dross(machine_name: str) -> bool:
+    return "ALL BACKLINE" in machine_name.upper()
+
+
+def needs_remove_unused_chemical(machine_name: str) -> bool:
+    return "CLEANING PALLET ROOM" in machine_name.upper()
+
+
 def extract_schedule_rules(worksheet) -> tuple[int, list[RowScheduleRule], CellRef | None]:
     template_month = parse_template_month(worksheet)
     rules: list[RowScheduleRule] = []
@@ -172,6 +203,10 @@ def extract_schedule_rules(worksheet) -> tuple[int, list[RowScheduleRule], CellR
         de_dross_start_day: int | None = None
         pm_plan_start_day: int | None = None
         pm_plan_text: str | None = None
+        de_dross_text = DE_DROSS_TEXT
+        auto_de_dross = False
+        chemical_source_col: int | None = None
+        auto_remove_unused_chemical = needs_remove_unused_chemical(machine_name)
 
         for col in range(DAY_START_COL, DAY_END_COL + 1):
             text = normalize_cell_text(worksheet.Cells(row, col).Text)
@@ -189,6 +224,8 @@ def extract_schedule_rules(worksheet) -> tuple[int, list[RowScheduleRule], CellR
                     default_de_dross_source = CellRef(row=row, col=col)
                 if de_dross_start_day is None:
                     de_dross_start_day = day
+                if needs_all_backline_de_dross(machine_name):
+                    de_dross_text = ALL_BACKLINE_DE_DROSS_TEXT
             elif kind == "pm_plan":
                 if pm_plan_source_col is None:
                     pm_plan_source_col = col
@@ -200,7 +237,20 @@ def extract_schedule_rules(worksheet) -> tuple[int, list[RowScheduleRule], CellR
         if blank_source_col is None:
             blank_source_col = DAY_START_COL
 
-        if de_dross_start_day is None and pm_plan_start_day is None:
+        if needs_all_backline_de_dross(machine_name) and de_dross_start_day is None:
+            de_dross_source_col = blank_source_col
+            de_dross_start_day = 1
+            de_dross_text = ALL_BACKLINE_DE_DROSS_TEXT
+            auto_de_dross = True
+
+        if auto_remove_unused_chemical:
+            chemical_source_col = blank_source_col
+
+        if (
+            de_dross_start_day is None
+            and pm_plan_start_day is None
+            and not auto_remove_unused_chemical
+        ):
             continue
 
         rules.append(
@@ -213,6 +263,10 @@ def extract_schedule_rules(worksheet) -> tuple[int, list[RowScheduleRule], CellR
                 de_dross_start_day=de_dross_start_day,
                 pm_plan_start_day=pm_plan_start_day,
                 pm_plan_text=pm_plan_text,
+                de_dross_text=de_dross_text,
+                auto_de_dross=auto_de_dross,
+                chemical_source_col=chemical_source_col,
+                auto_remove_unused_chemical=auto_remove_unused_chemical,
             )
         )
 
@@ -232,6 +286,12 @@ def copy_cell(
     )
 
 
+def apply_auto_de_dross_format(target_cell, template_worksheet, rule: RowScheduleRule) -> None:
+    target_cell.Interior.Color = YELLOW_FILL_COLOR
+    if rule.pm_plan_source_col is not None:
+        target_cell.Font.Size = template_worksheet.Cells(rule.row, rule.pm_plan_source_col).Font.Size
+
+
 def reset_row_schedule(worksheet, template_worksheet, row: int, blank_source_col: int) -> None:
     source = template_worksheet.Cells(row, blank_source_col)
     target = worksheet.Range(
@@ -248,15 +308,28 @@ def iter_occurrences(start_date: date, interval_days: int, year: int, month: int
     first_of_month = date(year, month, 1)
     last_of_month = date(year, month, calendar.monthrange(year, month)[1])
 
-    occurrence = start_date
-    if occurrence < first_of_month:
-        delta_days = (first_of_month - occurrence).days
-        jumps = (delta_days + interval_days - 1) // interval_days
-        occurrence += timedelta(days=jumps * interval_days)
+    offset = (first_of_month - start_date).days % interval_days
+    occurrence = first_of_month if offset == 0 else first_of_month + timedelta(days=interval_days - offset)
 
     while occurrence <= last_of_month:
         yield occurrence
         occurrence += timedelta(days=interval_days)
+
+
+def first_occurrence(start_date: date, interval_days: int, year: int, month: int) -> date | None:
+    return next(iter_occurrences(start_date, interval_days, year, month), None)
+
+
+def iter_weekdays(year: int, month: int, weekday: int):
+    current = date(year, month, 1)
+    last_of_month = date(year, month, calendar.monthrange(year, month)[1])
+
+    days_until_weekday = (weekday - current.weekday()) % 7
+    current += timedelta(days=days_until_weekday)
+
+    while current <= last_of_month:
+        yield current
+        current += timedelta(days=7)
 
 
 def iter_occurrences_from_anchor(anchor_date: date, interval_days: int, year: int, month: int):
@@ -290,7 +363,8 @@ def apply_schedule_rule(
 
     if rule.pm_plan_start_day is not None and rule.pm_plan_source_col is not None:
         anchor_date = date(year, template_month, rule.pm_plan_start_day)
-        for occurrence in iter_occurrences(anchor_date, 28, year, month):
+        occurrence = first_occurrence(anchor_date, 28, year, month)
+        if occurrence is not None:
             pm_plan_days.add(occurrence.day)
             target_col = DAY_START_COL + occurrence.day - 1
             copy_cell(
@@ -319,9 +393,11 @@ def apply_schedule_rule(
         occurrences = None
 
     if occurrences is not None:
+        de_dross_days: set[int] = set()
         for occurrence in occurrences:
             if occurrence.day in pm_plan_days:
                 continue
+            de_dross_days.add(occurrence.day)
             target_col = DAY_START_COL + occurrence.day - 1
             copy_cell(
                 template_worksheet,
@@ -331,7 +407,31 @@ def apply_schedule_rule(
                 rule.row,
                 target_col,
             )
-            worksheet.Cells(rule.row, target_col).Value = DE_DROSS_TEXT
+            target_cell = worksheet.Cells(rule.row, target_col)
+            target_cell.Value = rule.de_dross_text
+            target_cell.Font.Bold = True
+            if rule.auto_de_dross:
+                apply_auto_de_dross_format(target_cell, template_worksheet, rule)
+    else:
+        de_dross_days = set()
+
+    if rule.auto_remove_unused_chemical and rule.chemical_source_col is not None:
+        for occurrence in iter_weekdays(year, month, 4):
+            if occurrence.day in pm_plan_days or occurrence.day in de_dross_days:
+                continue
+            target_col = DAY_START_COL + occurrence.day - 1
+            copy_cell(
+                template_worksheet,
+                rule.row,
+                rule.chemical_source_col,
+                worksheet,
+                rule.row,
+                target_col,
+            )
+            target_cell = worksheet.Cells(rule.row, target_col)
+            target_cell.Value = REMOVE_CHEMICAL_TEXT
+            target_cell.Font.Bold = True
+            target_cell.Interior.Color = PINK_FILL_COLOR
 
     worksheet.Application.CutCopyMode = False
 

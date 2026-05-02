@@ -120,6 +120,14 @@ def draw_clock(base: Image.Image) -> None:
 def create_icon() -> None:
     ASSETS_DIR.mkdir(parents=True, exist_ok=True)
 
+    if PNG_PATH.exists():
+        icon = Image.open(PNG_PATH).convert("RGBA")
+        icon.save(PNG_PATH)
+        icon.save(ICO_PATH, sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
+        print(f"Created {PNG_PATH}")
+        print(f"Created {ICO_PATH}")
+        return
+
     canvas = Image.new("RGBA", (SIZE, SIZE), (0, 0, 0, 0))
     shadow = Image.new("RGBA", (SIZE, SIZE), (0, 0, 0, 0))
     ImageDraw.Draw(shadow).ellipse((92, 112, 932, 952), fill=(0, 0, 0, 70))

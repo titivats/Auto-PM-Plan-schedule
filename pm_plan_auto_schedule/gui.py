@@ -73,7 +73,9 @@ def load_state() -> AppState:
 
 
 def save_state(state: AppState) -> None:
-    state_file_path().write_text(
+    path = state_file_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
         json.dumps(
             {
                 "template_path": state.template_path,
@@ -259,46 +261,30 @@ class PMPlanApp:
             highlightthickness=1,
             highlightbackground="#244a6d",
             padx=24,
-            pady=22,
+            pady=20,
         )
-        header.grid_columnconfigure(1, weight=1)
-
-        left_badge = tk.Frame(header, bg=BG_HEADER_ALT, padx=14, pady=14)
-        left_badge.grid(row=0, column=0, rowspan=2, sticky="nw", padx=(0, 18))
-        if self.icon_preview is not None:
-            tk.Label(left_badge, image=self.icon_preview, bg=BG_HEADER_ALT).pack()
-        else:
-            tk.Label(
-                left_badge,
-                text="PM",
-                bg=BG_HEADER_ALT,
-                fg=TEXT_LIGHT,
-                font=("Segoe UI Semibold", 18),
-            ).pack()
+        header.grid_columnconfigure(0, weight=1)
 
         tk.Label(
             header,
-            text="Mass Production PM Schedule Generator",
+            text="PM Plan Schedule Generator",
             bg=BG_HEADER,
             fg=TEXT_LIGHT,
             font=("Segoe UI Semibold", 20),
-        ).grid(row=0, column=1, sticky="w")
+        ).grid(row=0, column=0, sticky="w")
 
         tk.Label(
             header,
-            text=(
-                "Operational desktop tool for planning, generating, and exporting Jan-Dec "
-                "ALL BACKLINE PM workbooks with controlled PM PLAN and DE-DROSS scheduling."
-            ),
+            text="Operational desktop application tool for plan, auto generate and export files.",
             bg=BG_HEADER,
             fg="#bfd0df",
             font=("Segoe UI", 10),
-            wraplength=660,
+            wraplength=820,
             justify="left",
-        ).grid(row=1, column=1, sticky="w", pady=(6, 0))
+        ).grid(row=1, column=0, sticky="w", pady=(8, 0))
 
         header_pill = tk.Frame(header, bg=ACCENT_RED, padx=14, pady=12)
-        header_pill.grid(row=0, column=2, rowspan=2, sticky="ne")
+        header_pill.grid(row=0, column=1, rowspan=2, sticky="ne", padx=(18, 0))
         tk.Label(
             header_pill,
             textvariable=self.year_badge_var,
@@ -308,7 +294,7 @@ class PMPlanApp:
         ).pack(anchor="e")
 
         accent_line = tk.Frame(header, bg=ACCENT_RED, height=4)
-        accent_line.grid(row=2, column=0, columnspan=3, sticky="ew", pady=(18, 0))
+        accent_line.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(18, 0))
 
         return header
 
@@ -444,6 +430,7 @@ class PMPlanApp:
         panel = self._make_card(parent, bg=BG_HEADER, padx=18, pady=18)
         panel.configure(highlightbackground="#284866")
         panel.grid_columnconfigure(0, weight=1)
+        panel.grid_rowconfigure(6, weight=1)
 
         tk.Label(
             panel,
@@ -486,13 +473,12 @@ class PMPlanApp:
         tk.Label(
             overview,
             text=(
-                "PM PLAN anchor is applied to BT01-BT09, A12, and A13. "
-                "PM PLAN runs every 28 days and DE-DROSS runs every 7 days around that anchor."
+                "PM Plan anchor is applied to BU:Tesla line production.\n"
+                "PM PLAN runs every 28 days, DE-DROSS runs every 7 days and Every Friday remove chemical inside cleaning room."
             ),
             bg=BG_HEADER_ALT,
             fg="#d0dceb",
             font=("Segoe UI", 9),
-            wraplength=300,
             justify="left",
         ).pack(anchor="w", pady=(4, 0))
 
@@ -511,7 +497,6 @@ class PMPlanApp:
             bg=BG_HEADER_ALT,
             fg="#d0dceb",
             font=("Segoe UI", 9),
-            wraplength=300,
             justify="left",
         ).pack(anchor="w", pady=(4, 0))
 
@@ -647,13 +632,16 @@ class PMPlanApp:
             return
 
         template, output_dir, year = validated
-        save_state(
-            AppState(
-                template_path=str(template),
-                output_dir=str(output_dir),
-                year=str(year),
+        try:
+            save_state(
+                AppState(
+                    template_path=str(template),
+                    output_dir=str(output_dir),
+                    year=str(year),
+                )
             )
-        )
+        except OSError as exc:
+            self._append_log(f"Could not save app settings: {exc}", "error")
 
         existing_files = sorted(output_dir.glob("*.xls*")) if output_dir.exists() else []
         if existing_files:

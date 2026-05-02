@@ -6,11 +6,13 @@ Desktop app for generating Jan-Dec PM plan files from:
 
 ## Project layout
 
-- `pm_plan_auto_schedule/` - app package
-- `assets/` - icon assets
-- `tools/create_icon.py` - icon generator
-- `tools/build_exe.ps1` - one-file Windows build script
-- `main.py` - app entrypoint
+- `dist/PMPlanAutoSchedule.exe` - latest built application to run
+- `pm_plan_auto_schedule/` - application source code
+- `assets/` - app icon image files
+- `tools/` - build and icon helper scripts
+- `tests/` - regression tests for schedule rules
+- `release/` - older portable/archive package
+- `main.py` - Python entrypoint
 
 ## Run in Python
 

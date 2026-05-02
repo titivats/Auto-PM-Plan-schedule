@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -25,4 +26,7 @@ def resource_path(*parts: str) -> Path:
 
 
 def state_file_path() -> Path:
+    appdata = os.environ.get("APPDATA")
+    if appdata:
+        return Path(appdata) / "PMPlanAutoSchedule" / STATE_FILENAME
     return app_root() / STATE_FILENAME

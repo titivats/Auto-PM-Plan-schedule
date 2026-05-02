@@ -20,5 +20,9 @@ if (Test-Path ".\dist") {
 
 & $python -m PyInstaller --noconfirm ".\PMPlanAutoSchedule.spec"
 
+if (Test-Path ".\build") {
+    Remove-Item -LiteralPath ".\build" -Recurse -Force
+}
+
 Write-Output ""
 Write-Output "Built: $root\dist\PMPlanAutoSchedule.exe"
